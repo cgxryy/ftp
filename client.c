@@ -26,6 +26,9 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <dirent.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <assert.h>
 
 #include "send_recv.c"
 
@@ -39,8 +42,10 @@ void 	my_err(char *string, int line);
 void 	information();
 int 	client(int sock_fd);
 int 	deal_server(int sock_fd);
+void 	command_ls(int sock_fd, char *buf, char *file);
 void 	deal_ls(char *buf, char filename[256][256]);
 void 	show_ls(char filename[][256]);
+void 	command_get(int sock_fd, char *buf, char *file);
 
 void information()
 {
@@ -107,7 +112,6 @@ int 	deal_server(int sock_fd)
 	int 		ret;
 	char 		file[256];
 	char  		buf[4096];
-	char 		filename[256][256] = {'\0'};
 	char 		command[256];
 	unsigned int 	cmd_num;
 	
@@ -164,7 +168,7 @@ int 	deal_server(int sock_fd)
 		{	
 			ret = send(sock_fd, file, 256, 0);
 			if (ret < 256)
-				{
+			{
 				printf("发送时丢失数据包...错误...\n");
 				return -1;
 			}
@@ -179,25 +183,32 @@ int 	deal_server(int sock_fd)
 			case QUIT:
 				break;
 			case LS:
-				ret = recv(sock_fd, (void*)buf, 4096, 0);
-				printf("已经接受到%d字节\n", ret);
-				if (ret < 0)
-				      my_err("recv",__LINE__);
-				if (ret == 0)
-				{
-					printf("异常断开连接...\n");
-				}
-				deal_ls(buf,filename);
-				show_ls(filename);
+				command_ls(sock_fd, buf, file);
 				break;
 			case GET:
-				command_get(sock_fd, buf);
+				command_get(sock_fd, buf, file);
 				break;
 			case PUT:
 				break;
 		}
 
 	}
+}
+
+void command_ls(int sock_fd, char *buf, char *file)
+{
+	char 	filename[256][256] = {'\0'};
+	int 	ret;
+
+	ret = recv(sock_fd, (void*)buf, 4096, 0);
+	printf("已经接受到%d字节\n", ret);
+	if (ret < 0)
+	     	my_err("recv",__LINE__);
+	if (ret == 0)
+		printf("异常断开连接...\n");
+				
+	deal_ls(buf,filename);
+	show_ls(filename);
 }
 
 void deal_ls(char *buf, char filename[][256])
@@ -263,6 +274,59 @@ void show_ls(char filename[][256])
 	printf("\n");
 }
 
-void command_get(int sock_fd, char *buf)
+void command_get(int sock_fd, char *buf, char *file)
 {
+	int 	file_fd;//新建的文件的文件描述符
+	char 	*now;//文件指针现在位置
+	int 	ret = 4096;//每次实际接收大小
+	unsigned long sum = 0;//接收总大小，测试用
+	char 	user[256];//存放user名
+	char  	path[256];
+	char 	former_path[256];
+	char 	*receive = former_path;
+	DIR 	*dir;
+	int 	recv_ret = 1;
+	int 	write_ret = 1;
+	int 	i = 0;	
+	//最后需恢复成原来工作路径
+/*      receive = getcwd(receive, 256);
+	if (receive == NULL)
+	      my_err("getcwd", __LINE__);
+	//把接收的文件送到当前用户的receive_ftp目录下
+	receive = getlogin();
+	strcpy(user, receive);
+	strcpy(path, "/home/");
+	strcat(path, user);
+	mkdir("receive_ftp",0644);
+	strcat(path, "/receive_ftp");
+
+	chdir_ret = chdir(path);
+	printf("当前目录为%s\n", path);
+	
+	assert(chdir_ret == 0);
+	*/
+	//创建文件，写入
+	file_fd = open(file, O_CREAT|O_EXCL|O_RDWR, 0644);
+	if (file_fd == -1)
+	      my_err("malloc",__LINE__);
+
+	while (1)
+	{
+		memset(buf, 0, 4096);
+		recv_ret = recv(sock_fd, buf, 4096, 0);
+		printf("接收到%d字节，准备写入...\n", recv_ret);
+		if (recv_ret == -1)
+		      my_err("recv",__LINE__);
+		//需要移动指针，否则始终写入前4096字节
+		write_ret = write(file_fd, buf, recv_ret-1);
+		printf("写入文件%d字节....\n", write_ret);
+		if (write_ret == -1)
+		      my_err("write",__LINE__);
+		i++;
+	}
+	printf("\n\t共写入%d次", i);
+
+	close(file_fd);
+	printf("恢复到之前目录%s\n",former_path);
+	chdir(former_path);
 }
