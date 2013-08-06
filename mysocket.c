@@ -26,6 +26,8 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <dirent.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include "send_recv.c"
 
@@ -148,13 +150,15 @@ int server(int client_fd)
 		memset(file, 0, 256);
 		
 		size = recv(client_fd, file, 256, 0);
+		if (size < 256)
+		      my_err("recv", __LINE__);
 		printf("接受到文件名数据%d字节",size);
 		printf("%s", (char*)file);
 		printf("序号为%u\n", cmd_num);
 		
-		free(file);
 		command_choice(client_fd, cmd_num, file);
 
+		free(file);
 	}
 }
 
@@ -162,8 +166,6 @@ void command_choice(int client_fd, unsigned int command, char *file)
 {
 	
 	printf("进入command_choice()...\n");
-	printf("未处理时文件名%s\n",file);
-	filename_deal(file);
 	switch (command)
 	{
 		case QUIT:	      
@@ -192,6 +194,9 @@ void command_ls(int client_fd, unsigned int command, char *file)
 
 	printf("进入command_ls()...\n");
 	memset((void*)&filename, '\0', (size_t)sizeof(filename));
+
+	printf("未处理时文件名%s\n",file);
+	filename_deal(file);
 
 	dir = opendir(file);
 	if (dir == NULL)
@@ -243,12 +248,48 @@ void filename_deal(char *file)
 void command_get(int client_fd, unsigned int command, char *file)
 {
 	char 	*buf;//用户自定义缓存区
-	int 	ret;//每次实际发送大小
-	char 	file_fd;//打开的文件描述符
+	char 	*now;//现在文件指针所在处
+	int 	send_ret = 4096;
+	int 	read_ret = 4096;//每次实际发送大小,为了循环第一次判断初值为大于0的值
+	int  	file_fd;//打开的文件描述符
+	unsigned long sum = 0;//测试时统计发送总大小	
+	char 	former_path[256];
+	char 	*receive = former_path;
+	int 	i = 0;
 
-	buf = malloc(4096);
+	receive = getcwd(receive, 256);
+	if (receive == NULL)
+	      my_err("getcwd", __LINE__);
+	//转换到文件所在目录
+	chdir("/home/chang/changgong");
+	printf("已经转到/home/chang/changgong目录\n");
+
+	//开始读出发送
+	buf = malloc(sizeof(int)+ 4096);
+	file_fd = open(file, O_RDWR, 0644);
+	if (file_fd == -1)
+	      my_err("open", __LINE__);
+
+	//全部发送完时ret为0
+	while (1)
+	{
+		//buf所指空间第一个字符为标志位，表示是否传完
+		memset(buf, 0, 4096);
+		read_ret = read(file_fd, buf, 4096);
+		printf("读出%d字节信息，准备发送...\n", read_ret);
+		if (read_ret == -1)
+		      my_err("read", __LINE__);
+		//read_ret实际读出值，也是要发送出的大小
+		send_ret = send(client_fd, buf, read_ret, 0);
+		printf("发送%d字节信息...\n", send_ret);
+		if (send_ret == -1)
+		      my_err("send", __LINE__);	
+		i++;
+	}
+	printf("\n\t共发送%d次\n", i);
 	
-	file = open();
-
-	while (ret < 4096)
+	close(file_fd);
+	free(buf);
+	printf("恢复到之前目录%s\n",former_path);
+	chdir(former_path);
 }
